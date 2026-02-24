@@ -3,6 +3,20 @@ from logger import logger
 from market_data import MarketData
 from analyzer import TechnicalAnalyzer
 from risk_manager import RiskManager
+from dataclasses import dataclass
+
+# Trading constants
+MIN_CONFIDENCE_THRESHOLD = 60
+
+@dataclass
+class TradeContext:
+    """Context for trade execution"""
+    symbol: str
+    recommendation: dict
+    current_price: float
+    position_info: dict
+    positions: list
+    risk_manager: RiskManager
 
 class Trader:
     def __init__(self):
@@ -81,39 +95,42 @@ class Trader:
         )
 
         # Execute based on recommendation
-        self._execute_recommendation(
-            symbol, recommendation, current_price,
-            position_info, positions, risk_manager
-        )
+        ctx = TradeContext(symbol, recommendation, current_price, position_info, positions, risk_manager)
+        self._execute_recommendation(ctx)
 
-    def _execute_recommendation(self, symbol, recommendation, current_price, position_info, positions, risk_manager):
+    def _execute_recommendation(self, ctx: TradeContext):
         """Execute trading action based on AI recommendation"""
-        action = recommendation['action']
-        confidence = recommendation['confidence']
+        action = ctx.recommendation['action']
+        confidence = ctx.recommendation['confidence']
 
-        # Require minimum confidence
-        if confidence < 60:
-            logger.info(f"Skipping {symbol}: confidence too low ({confidence}%)")
+        if confidence < MIN_CONFIDENCE_THRESHOLD:
+            logger.info(f"Skipping {ctx.symbol}: confidence too low ({confidence}%)")
             return
 
         if action == "BUY":
-            if position_info:
-                logger.info(f"Already holding {symbol}, skipping buy")
-            elif risk_manager.can_open_position(len(positions)):
-                qty = risk_manager.calculate_position_size(symbol, current_price)
-                if qty > 0:
-                    self._buy_position(symbol, qty)
-            else:
-                logger.info(f"Cannot buy {symbol}: max positions reached")
-
+            self._handle_buy(ctx)
         elif action == "SELL":
-            if position_info:
-                self._sell_position(symbol, position_info['qty'], "AI_RECOMMENDATION")
-            else:
-                logger.info(f"No position to sell for {symbol}")
+            self._handle_sell(ctx)
+        else:
+            logger.info(f"Holding {ctx.symbol}")
 
-        else:  # HOLD
-            logger.info(f"Holding {symbol}")
+    def _handle_buy(self, ctx: TradeContext):
+        """Handle buy action"""
+        if ctx.position_info:
+            logger.info(f"Already holding {ctx.symbol}, skipping buy")
+        elif ctx.risk_manager.can_open_position(len(ctx.positions)):
+            qty = ctx.risk_manager.calculate_position_size(ctx.symbol, ctx.current_price)
+            if qty > 0:
+                self._buy_position(ctx.symbol, qty)
+        else:
+            logger.info(f"Cannot buy {ctx.symbol}: max positions reached")
+
+    def _handle_sell(self, ctx: TradeContext):
+        """Handle sell action"""
+        if ctx.position_info:
+            self._sell_position(ctx.symbol, ctx.position_info['qty'], "AI_RECOMMENDATION")
+        else:
+            logger.info(f"No position to sell for {ctx.symbol}")
 
     def _buy_position(self, symbol, qty):
         """Execute buy order"""
